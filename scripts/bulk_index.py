@@ -32,7 +32,7 @@ load_dotenv()
 SKIP_DIRS = {".obsidian", "templates", ".git", ".trash", ".smart-env", "node_modules"}
 MAX_FILE_SIZE = 500 * 1024  # 500 KB
 BATCH_SIZE = 20  # Chunks per embedding batch
-MAX_CHUNK_CHARS = 6000  # ~4K-6K tokens, safe for nomic-embed-text 8192 token limit
+MAX_CHUNK_CHARS = 2000  # Conservative: ~1500 tokens, safe for nomic-embed-text 8192 token limit
 
 
 def file_hash(content: str) -> str:
@@ -197,10 +197,20 @@ def index_file(
     return chunks
 
 
+def embed_single_chunk(chunk: dict) -> bool:
+    """Embed a single chunk individually. Returns True on success."""
+    try:
+        embeddings = get_embeddings_batch([chunk["content"]])
+        chunk["embedding"] = embeddings[0]
+        return True
+    except Exception:
+        return False
+
+
 def embed_and_upsert(all_chunks: list[dict]) -> tuple[int, int]:
-    """Embed chunks in batches and upsert to Supabase. Returns (upserted, errors)."""
+    """Embed chunks in batches and upsert to Supabase. Returns (upserted, skipped)."""
     total = 0
-    batch_errors = 0
+    skipped = 0
 
     for i in tqdm(range(0, len(all_chunks), BATCH_SIZE), desc="Embedding + upserting"):
         batch = all_chunks[i : i + BATCH_SIZE]
@@ -208,24 +218,25 @@ def embed_and_upsert(all_chunks: list[dict]) -> tuple[int, int]:
 
         try:
             embeddings = get_embeddings_batch(texts)
-        except Exception as e:
-            batch_errors += 1
-            paths = {c["file_path"] for c in batch}
-            tqdm.write(f"Embedding error (batch {i // BATCH_SIZE}): {e}")
-            tqdm.write(f"  Files: {paths}")
-            continue
+            for chunk, emb in zip(batch, embeddings):
+                chunk["embedding"] = emb
+        except Exception:
+            # Batch failed — retry each chunk individually
+            for chunk in batch:
+                if not embed_single_chunk(chunk):
+                    skipped += 1
+                    tqdm.write(f"Skipped (too long): {chunk['file_path']} chunk {chunk['chunk_index']} ({len(chunk['content'])} chars)")
 
-        for chunk, emb in zip(batch, embeddings):
-            chunk["embedding"] = emb
+        embedded_batch = [c for c in batch if "embedding" in c]
+        if embedded_batch:
+            try:
+                upsert_chunks(embedded_batch)
+                total += len(embedded_batch)
+            except Exception as e:
+                skipped += len(embedded_batch)
+                tqdm.write(f"Upsert error (batch {i // BATCH_SIZE}): {e}")
 
-        try:
-            upsert_chunks(batch)
-            total += len(batch)
-        except Exception as e:
-            batch_errors += 1
-            tqdm.write(f"Upsert error (batch {i // BATCH_SIZE}): {e}")
-
-    return total, batch_errors
+    return total, skipped
 
 
 def main():
@@ -282,10 +293,10 @@ def main():
 
     # Embed and upsert
     print(f"\nEmbedding {len(all_chunks)} chunks via Ollama (batch size {BATCH_SIZE})...")
-    upserted, batch_errors = embed_and_upsert(all_chunks)
+    upserted, skipped = embed_and_upsert(all_chunks)
     print(f"\nDone! Upserted {upserted} chunks to Supabase.")
-    if batch_errors:
-        print(f"Failed batches: {batch_errors}")
+    if skipped:
+        print(f"Skipped chunks (too long for context): {skipped}")
 
 
 if __name__ == "__main__":
