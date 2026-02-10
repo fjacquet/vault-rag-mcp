@@ -23,7 +23,7 @@ from tqdm import tqdm
 # Add src to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from vault_rag_mcp.embeddings import get_embedding, get_embeddings_batch
+from vault_rag_mcp.embeddings import get_embeddings_batch
 from vault_rag_mcp.supabase_client import delete_file_chunks, get_client, upsert_chunks
 
 load_dotenv()
@@ -32,6 +32,7 @@ load_dotenv()
 SKIP_DIRS = {".obsidian", "templates", ".git", ".trash", ".smart-env", "node_modules"}
 MAX_FILE_SIZE = 500 * 1024  # 500 KB
 BATCH_SIZE = 20  # Chunks per embedding batch
+MAX_CHUNK_CHARS = 6000  # ~4K-6K tokens, safe for nomic-embed-text 8192 token limit
 
 
 def file_hash(content: str) -> str:
@@ -57,11 +58,47 @@ def parse_frontmatter(content: str) -> tuple[dict, str]:
     return metadata, body
 
 
-def chunk_by_h2(body: str, file_path: str) -> list[str]:
+def split_long_chunk(text: str, max_chars: int = MAX_CHUNK_CHARS) -> list[str]:
+    """Split a chunk that exceeds max_chars into smaller pieces.
+
+    Splits on paragraph boundaries first, then hard-splits if needed.
+    """
+    if len(text) <= max_chars:
+        return [text]
+
+    result = []
+    # Split by double newline (paragraphs)
+    paragraphs = re.split(r"\n\n+", text)
+    current = ""
+
+    for para in paragraphs:
+        if len(current) + len(para) + 2 > max_chars:
+            if current.strip():
+                result.append(current.strip())
+            # If a single paragraph is too long, hard-split it
+            if len(para) > max_chars:
+                for j in range(0, len(para), max_chars):
+                    piece = para[j : j + max_chars].strip()
+                    if piece:
+                        result.append(piece)
+                current = ""
+            else:
+                current = para
+        else:
+            current = current + "\n\n" + para if current else para
+
+    if current.strip():
+        result.append(current.strip())
+
+    return result if result else [text[:max_chars]]
+
+
+def chunk_by_h2(body: str) -> list[str]:
     """Split body text into chunks by H2 headers.
 
-    If the file is short (< 1000 chars) or has no H2 headers,
+    If the file is short (< 100 chars) or has no H2 headers,
     return the whole body as a single chunk.
+    Chunks exceeding MAX_CHUNK_CHARS are split further.
     """
     if len(body.strip()) < 100:
         return []
@@ -72,7 +109,12 @@ def chunk_by_h2(body: str, file_path: str) -> list[str]:
     if not chunks:
         return [body.strip()] if body.strip() else []
 
-    return chunks
+    # Split any oversized chunks
+    final_chunks = []
+    for chunk in chunks:
+        final_chunks.extend(split_long_chunk(chunk))
+
+    return final_chunks
 
 
 def get_para_folder(rel_path: str) -> str:
@@ -125,7 +167,7 @@ def index_file(
         return None
 
     metadata, body = parse_frontmatter(content)
-    chunks_text = chunk_by_h2(body, rel_path)
+    chunks_text = chunk_by_h2(body)
 
     if not chunks_text:
         return None
@@ -155,23 +197,35 @@ def index_file(
     return chunks
 
 
-def embed_and_upsert(all_chunks: list[dict]) -> int:
-    """Embed chunks in batches and upsert to Supabase. Returns count of upserted chunks."""
+def embed_and_upsert(all_chunks: list[dict]) -> tuple[int, int]:
+    """Embed chunks in batches and upsert to Supabase. Returns (upserted, errors)."""
     total = 0
+    batch_errors = 0
 
     for i in tqdm(range(0, len(all_chunks), BATCH_SIZE), desc="Embedding + upserting"):
         batch = all_chunks[i : i + BATCH_SIZE]
         texts = [c["content"] for c in batch]
 
-        embeddings = get_embeddings_batch(texts)
+        try:
+            embeddings = get_embeddings_batch(texts)
+        except Exception as e:
+            batch_errors += 1
+            paths = {c["file_path"] for c in batch}
+            tqdm.write(f"Embedding error (batch {i // BATCH_SIZE}): {e}")
+            tqdm.write(f"  Files: {paths}")
+            continue
 
         for chunk, emb in zip(batch, embeddings):
             chunk["embedding"] = emb
 
-        upsert_chunks(batch)
-        total += len(batch)
+        try:
+            upsert_chunks(batch)
+            total += len(batch)
+        except Exception as e:
+            batch_errors += 1
+            tqdm.write(f"Upsert error (batch {i // BATCH_SIZE}): {e}")
 
-    return total
+    return total, batch_errors
 
 
 def main():
@@ -228,8 +282,10 @@ def main():
 
     # Embed and upsert
     print(f"\nEmbedding {len(all_chunks)} chunks via Ollama (batch size {BATCH_SIZE})...")
-    upserted = embed_and_upsert(all_chunks)
+    upserted, batch_errors = embed_and_upsert(all_chunks)
     print(f"\nDone! Upserted {upserted} chunks to Supabase.")
+    if batch_errors:
+        print(f"Failed batches: {batch_errors}")
 
 
 if __name__ == "__main__":
