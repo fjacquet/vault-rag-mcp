@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Bulk indexation script for the Second Brain vault.
 
-Indexes all markdown files via local Ollama nomic-embed-text (768d)
+Indexes all markdown files via OpenRouter text-embedding-3-small (1536d)
 and upserts into Supabase pgvector vault_chunks table.
 
 Usage:
@@ -31,8 +31,8 @@ load_dotenv()
 # Directories and files to skip
 SKIP_DIRS = {".obsidian", "templates", ".git", ".trash", ".smart-env", "node_modules"}
 MAX_FILE_SIZE = 500 * 1024  # 500 KB
-BATCH_SIZE = 20  # Chunks per embedding batch
-MAX_CHUNK_CHARS = 2000  # Conservative: ~1500 tokens, safe for nomic-embed-text 8192 token limit
+BATCH_SIZE = 100  # Chunks per embedding batch (OpenAI API handles large batches)
+MAX_CHUNK_CHARS = 2000  # Conservative: ~1500 tokens, safe for text-embedding-3-small 8192 token limit
 
 
 def file_hash(content: str) -> str:
@@ -292,7 +292,7 @@ def main():
         return
 
     # Embed and upsert
-    print(f"\nEmbedding {len(all_chunks)} chunks via Ollama (batch size {BATCH_SIZE})...")
+    print(f"\nEmbedding {len(all_chunks)} chunks via OpenRouter (batch size {BATCH_SIZE})...")
     upserted, skipped = embed_and_upsert(all_chunks)
     print(f"\nDone! Upserted {upserted} chunks to Supabase.")
     if skipped:
