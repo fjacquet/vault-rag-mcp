@@ -1,21 +1,25 @@
 # vault-rag-mcp
 
-MCP server for semantic search in an Obsidian Second Brain vault, using Supabase pgvector and local Ollama embeddings.
+MCP server for semantic search in an Obsidian Second Brain vault, using Supabase pgvector and Google Gemini embeddings.
 
 ## Architecture
 
 ```
 Claude Code <-> vault-rag MCP server (stdio)
-                 |-> Ollama nomic-embed-text (768d, local)
-                 |-> Supabase pgvector cosine similarity
+                 |-> Google Gemini gemini-embedding-001 (native 3072d)
+                 |-> Supabase pgvector halfvec cosine similarity
 ```
 
 Part of a hybrid RAG architecture:
-- **Indexation**: n8n (remote) + OpenRouter `nomic-ai/nomic-embed-text`
-- **Local queries**: This MCP server + Ollama `nomic-embed-text`
-- **Web chat**: n8n Chat Hub + OpenRouter embed + LLM
+- **Indexation**: n8n (remote) + Google Gemini API
+- **Local queries**: This MCP server + Google Gemini API
+- **Web chat**: n8n Vault Chat (AI Agent + Gemini native) or Chat Hub (HTTP pipeline)
+- **Bulk index**: Script using Gemini `gemini-embedding-001`
 
-Same model (`nomic-embed-text`, 768d) everywhere ensures vector compatibility.
+Same model (`gemini-embedding-001`, native 3072d) everywhere ensures vector compatibility.
+Storage optimized with `halfvec` (float16) — full quality at half the storage (~284 MB vs ~567 MB).
+
+Asymmetric task types: `RETRIEVAL_DOCUMENT` for indexing, `RETRIEVAL_QUERY` for search.
 
 ## Tools
 
@@ -29,12 +33,8 @@ Same model (`nomic-embed-text`, 768d) everywhere ensures vector compatibility.
 
 - Python >= 3.11
 - [uv](https://docs.astral.sh/uv/) package manager
-- [Ollama](https://ollama.com/) with `nomic-embed-text` model pulled
+- Google API key (for Gemini embeddings)
 - Supabase project with `vault_chunks` table and pgvector
-
-```bash
-ollama pull nomic-embed-text
-```
 
 ## Setup
 
@@ -45,7 +45,7 @@ uv sync
 
 # Configure environment
 cp .env.example .env
-# Edit .env with your Supabase credentials
+# Edit .env with your Google API key and Supabase credentials
 ```
 
 ### Environment variables
@@ -54,8 +54,9 @@ cp .env.example .env
 |----------|-------------|---------|
 | `SUPABASE_URL` | Supabase project URL | (required) |
 | `SUPABASE_KEY` | Supabase anon key | (required) |
-| `OLLAMA_HOST` | Ollama API endpoint | `http://localhost:11434` |
-| `OLLAMA_MODEL` | Embedding model name | `nomic-embed-text` |
+| `GOOGLE_API_KEY` | Google AI API key | (required) |
+| `EMBEDDING_MODEL` | Gemini embedding model | `gemini-embedding-001` |
+| `EMBEDDING_DIMENSIONS` | Output dimensions (native=3072) | `3072` |
 
 ## Usage
 
@@ -72,8 +73,9 @@ Add to your project's `.mcp.json`:
       "env": {
         "SUPABASE_URL": "https://your-project.supabase.co",
         "SUPABASE_KEY": "your-anon-key",
-        "OLLAMA_HOST": "http://localhost:11434",
-        "OLLAMA_MODEL": "nomic-embed-text"
+        "GOOGLE_API_KEY": "your-google-api-key",
+        "EMBEDDING_MODEL": "gemini-embedding-001",
+        "EMBEDDING_DIMENSIONS": "3072"
       }
     }
   }
@@ -84,10 +86,10 @@ Restart Claude Code to activate. Then use the tools directly in conversation.
 
 ### Bulk indexation
 
-One-time script to index an entire Obsidian vault via local Ollama:
+Script to index an entire Obsidian vault via Google Gemini:
 
 ```bash
-uv run python scripts/bulk_index.py /path/to/vault
+uv run python scripts/bulk_index.py /path/to/vault [--force]
 ```
 
 Options:
@@ -96,11 +98,11 @@ Options:
 The script:
 1. Walks the vault, skips `.obsidian/`, `templates/`, `.trash/`, files > 500 KB
 2. Parses YAML frontmatter (type, tags, PARA folder)
-3. Chunks by H2 sections, splits oversized chunks (> 6000 chars)
-4. Embeds via Ollama in batches of 20
+3. Chunks by H2 sections, splits oversized chunks (> 2000 chars)
+4. Embeds via Google Gemini in batches of 50 (task_type=RETRIEVAL_DOCUMENT)
 5. Upserts to Supabase with SHA256 file_hash for incremental re-runs
 
-After initial bulk indexation, incremental updates are handled by n8n via OpenRouter.
+After initial bulk indexation, incremental updates are handled by n8n via Gemini API.
 
 ## Project structure
 
@@ -112,17 +114,20 @@ vault-rag-mcp/
 │   └── vault_rag_mcp/
 │       ├── __init__.py
 │       ├── server.py           # MCP server (FastMCP, stdio) — 3 tools
-│       ├── embeddings.py       # Ollama embedding client
+│       ├── embeddings.py       # Google Gemini embedding client (native 3072d)
 │       └── supabase_client.py  # Supabase CRUD + RPC calls
-└── scripts/
-    └── bulk_index.py           # Bulk indexation via Ollama
+├── scripts/
+│   └── bulk_index.py           # Bulk indexation via Google Gemini
+└── n8n-workflows/              # n8n workflow definitions
+    ├── vault-rag-github-indexation.json
+    └── vault-rag-chat-hub.json
 ```
 
 ## Supabase schema
 
 Table `vault_chunks` with:
 - `content TEXT` — chunk text
-- `embedding VECTOR(768)` — nomic-embed-text vector
+- `embedding HALFVEC(3072)` — gemini-embedding-001 vector (float16, half storage)
 - `metadata JSONB` — tags, type, para_folder
 - `file_path TEXT` — relative path from vault root
 - `chunk_index INTEGER` — position within file
@@ -130,11 +135,11 @@ Table `vault_chunks` with:
 - `note_type TEXT` — frontmatter type (memo, glossary, howto, etc.)
 - `file_hash TEXT` — SHA256 for change detection
 
-RPC functions: `search_vault()`, `delete_file_chunks()`
+RPC functions: `search_vault()`, `match_vault_chunks()`, `delete_file_chunks()`
 
 ## Tech stack
 
 - **MCP SDK**: `mcp[cli]` with `FastMCP` (stdio transport)
-- **Embeddings**: Ollama `nomic-embed-text` (768d, multilingual, 8192 token context)
-- **Vector DB**: Supabase PostgreSQL + pgvector (HNSW cosine index)
+- **Embeddings**: Google Gemini `gemini-embedding-001` (native 3072d, multilingual, 2048 token/text)
+- **Vector DB**: Supabase PostgreSQL + pgvector 0.8.0 (HNSW cosine, halfvec storage)
 - **Build**: uv + hatch

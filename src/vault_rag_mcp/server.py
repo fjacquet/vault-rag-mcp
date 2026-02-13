@@ -50,7 +50,7 @@ def search_vault(
         para_folder: Filter by PARA folder (1_Projects, 2_Areas, 3_Resources, 4_Archives)
         note_type: Filter by note type (memo, glossary, howto, meeting-note, etc.)
     """
-    embedding = get_embedding(query)
+    embedding = get_embedding(query, task_type="RETRIEVAL_QUERY")
     results = supabase_client.search_vault(
         query_embedding=embedding,
         match_count=limit,
@@ -70,7 +70,7 @@ def search_glossary(query: str, limit: int = 5) -> str:
         query: Term or concept to look up (works in French and English)
         limit: Maximum number of results (default 5)
     """
-    embedding = get_embedding(query)
+    embedding = get_embedding(query, task_type="RETRIEVAL_QUERY")
     results = supabase_client.search_vault(
         query_embedding=embedding,
         match_count=limit,

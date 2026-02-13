@@ -1,42 +1,42 @@
-"""OpenRouter embedding client using OpenAI-compatible API."""
+"""Google Gemini embedding client using google-genai SDK."""
 
 import os
 
-import openai
+from google import genai
+from google.genai.types import EmbedContentConfig
 
 _client = None
 
 
-def _get_client() -> openai.OpenAI:
-    """Lazy-init OpenAI client (allows dotenv to load first)."""
+def _get_client() -> genai.Client:
+    """Lazy-init Google GenAI client (allows dotenv to load first)."""
     global _client
     if _client is None:
-        _client = openai.OpenAI(
-            base_url=os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
-            api_key=os.getenv("OPENROUTER_API_KEY"),
-        )
+        _client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
     return _client
 
 
 def _get_model() -> str:
-    return os.getenv("EMBEDDING_MODEL", "openai/text-embedding-3-small")
+    return os.getenv("EMBEDDING_MODEL", "gemini-embedding-001")
 
 
-def _get_dimensions() -> int:
-    return int(os.getenv("EMBEDDING_DIMENSIONS", "768"))
-
-
-def get_embedding(text: str) -> list[float]:
-    """Get embedding from OpenRouter (text-embedding-3-small, 768d by default)."""
-    response = _get_client().embeddings.create(
-        model=_get_model(), input=text, dimensions=_get_dimensions()
+def get_embedding(text: str, task_type: str = "SEMANTIC_SIMILARITY") -> list[float]:
+    """Get embedding from Google Gemini (native 3072d, already L2-normalized)."""
+    response = _get_client().models.embed_content(
+        model=_get_model(),
+        contents=text,
+        config=EmbedContentConfig(task_type=task_type),
     )
-    return response.data[0].embedding
+    return response.embeddings[0].values
 
 
-def get_embeddings_batch(texts: list[str]) -> list[list[float]]:
-    """Get embeddings for multiple texts in one API call."""
-    response = _get_client().embeddings.create(
-        model=_get_model(), input=texts, dimensions=_get_dimensions()
+def get_embeddings_batch(
+    texts: list[str], task_type: str = "SEMANTIC_SIMILARITY"
+) -> list[list[float]]:
+    """Get embeddings for multiple texts in one API call (max 250 per call)."""
+    response = _get_client().models.embed_content(
+        model=_get_model(),
+        contents=texts,
+        config=EmbedContentConfig(task_type=task_type),
     )
-    return [item.embedding for item in response.data]
+    return [emb.values for emb in response.embeddings]

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Bulk indexation script for the Second Brain vault.
 
-Indexes all markdown files via OpenRouter text-embedding-3-small (1536d)
-and upserts into Supabase pgvector vault_chunks table.
+Indexes all markdown files via Google Gemini gemini-embedding-001 (native 3072d)
+and upserts into Supabase pgvector vault_chunks table (halfvec storage).
 
 Usage:
     uv run python scripts/bulk_index.py /path/to/vault [--force]
@@ -31,8 +31,8 @@ load_dotenv()
 # Directories and files to skip
 SKIP_DIRS = {".obsidian", "templates", ".git", ".trash", ".smart-env", "node_modules"}
 MAX_FILE_SIZE = 500 * 1024  # 500 KB
-BATCH_SIZE = 100  # Chunks per embedding batch (OpenAI API handles large batches)
-MAX_CHUNK_CHARS = 2000  # Conservative: ~1500 tokens, safe for text-embedding-3-small 8192 token limit
+BATCH_SIZE = 50  # Chunks per batch (Gemini: 20K tokens/request, 250 texts max)
+MAX_CHUNK_CHARS = 2000  # Conservative: ~1500 tokens, safe for Gemini 2048 token/text limit
 
 
 def file_hash(content: str) -> str:
@@ -200,7 +200,7 @@ def index_file(
 def embed_single_chunk(chunk: dict) -> bool:
     """Embed a single chunk individually. Returns True on success."""
     try:
-        embeddings = get_embeddings_batch([chunk["content"]])
+        embeddings = get_embeddings_batch([chunk["content"]], task_type="RETRIEVAL_DOCUMENT")
         chunk["embedding"] = embeddings[0]
         return True
     except Exception:
@@ -217,7 +217,7 @@ def embed_and_upsert(all_chunks: list[dict]) -> tuple[int, int]:
         texts = [c["content"] for c in batch]
 
         try:
-            embeddings = get_embeddings_batch(texts)
+            embeddings = get_embeddings_batch(texts, task_type="RETRIEVAL_DOCUMENT")
             for chunk, emb in zip(batch, embeddings):
                 chunk["embedding"] = emb
         except Exception:
@@ -292,7 +292,7 @@ def main():
         return
 
     # Embed and upsert
-    print(f"\nEmbedding {len(all_chunks)} chunks via OpenRouter (batch size {BATCH_SIZE})...")
+    print(f"\nEmbedding {len(all_chunks)} chunks via Google Gemini (batch size {BATCH_SIZE})...")
     upserted, skipped = embed_and_upsert(all_chunks)
     print(f"\nDone! Upserted {upserted} chunks to Supabase.")
     if skipped:
