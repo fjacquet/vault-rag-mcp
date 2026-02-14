@@ -2,7 +2,7 @@
 """Bulk indexation script for the Second Brain vault.
 
 Indexes all markdown files via Google Gemini gemini-embedding-001 (native 3072d)
-and upserts into Supabase pgvector vault_chunks table (halfvec storage).
+and upserts into Qdrant vault_chunks collection.
 
 Usage:
     uv run python scripts/bulk_index.py /path/to/vault [--force]
@@ -24,7 +24,12 @@ from tqdm import tqdm
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from vault_rag_mcp.embeddings import get_embeddings_batch
-from vault_rag_mcp.supabase_client import delete_file_chunks, get_client, upsert_chunks
+from vault_rag_mcp.qdrant_store import (
+    delete_file_chunks,
+    ensure_collection,
+    get_existing_hashes,
+    upsert_chunks,
+)
 
 load_dotenv()
 
@@ -140,15 +145,11 @@ def should_skip(path: Path, vault_root: Path) -> bool:
     return False
 
 
-def get_existing_hashes(client) -> dict[str, str]:
-    """Fetch existing file_hash values from Supabase for change detection."""
-    result = (
-        client.table("vault_chunks")
-        .select("file_path, file_hash")
-        .eq("chunk_index", 0)
-        .execute()
-    )
-    return {r["file_path"]: r["file_hash"] for r in result.data if r.get("file_hash")}
+def fetch_existing_hashes(force: bool) -> dict[str, str]:
+    """Fetch existing file_hash values from Qdrant for change detection."""
+    if force:
+        return {}
+    return get_existing_hashes()
 
 
 def index_file(
@@ -208,7 +209,7 @@ def embed_single_chunk(chunk: dict) -> bool:
 
 
 def embed_and_upsert(all_chunks: list[dict]) -> tuple[int, int]:
-    """Embed chunks in batches and upsert to Supabase. Returns (upserted, skipped)."""
+    """Embed chunks in batches and upsert to Qdrant. Returns (upserted, skipped)."""
     total = 0
     skipped = 0
 
@@ -258,9 +259,11 @@ def main():
     md_files = [p for p in vault_root.rglob("*.md") if not should_skip(p, vault_root)]
     print(f"Found {len(md_files)} markdown files to process")
 
+    # Ensure Qdrant collection exists with correct config
+    ensure_collection()
+
     # Fetch existing hashes for incremental indexing
-    client = get_client()
-    existing_hashes = {} if force else get_existing_hashes(client)
+    existing_hashes = fetch_existing_hashes(force)
     print(f"Existing indexed files: {len(existing_hashes)}")
 
     # Parse and chunk all files
@@ -294,7 +297,7 @@ def main():
     # Embed and upsert
     print(f"\nEmbedding {len(all_chunks)} chunks via Google Gemini (batch size {BATCH_SIZE})...")
     upserted, skipped = embed_and_upsert(all_chunks)
-    print(f"\nDone! Upserted {upserted} chunks to Supabase.")
+    print(f"\nDone! Upserted {upserted} chunks to Qdrant.")
     if skipped:
         print(f"Skipped chunks (too long for context): {skipped}")
 

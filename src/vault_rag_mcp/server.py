@@ -8,7 +8,7 @@ Exposes 3 tools:
 
 from mcp.server.fastmcp import FastMCP
 
-from . import supabase_client
+from . import qdrant_store
 from .embeddings import get_embedding
 
 mcp = FastMCP(
@@ -51,7 +51,7 @@ def search_vault(
         note_type: Filter by note type (memo, glossary, howto, meeting-note, etc.)
     """
     embedding = get_embedding(query, task_type="RETRIEVAL_QUERY")
-    results = supabase_client.search_vault(
+    results = qdrant_store.search_vault(
         query_embedding=embedding,
         match_count=limit,
         filter_para_folder=para_folder,
@@ -71,7 +71,7 @@ def search_glossary(query: str, limit: int = 5) -> str:
         limit: Maximum number of results (default 5)
     """
     embedding = get_embedding(query, task_type="RETRIEVAL_QUERY")
-    results = supabase_client.search_vault(
+    results = qdrant_store.search_vault(
         query_embedding=embedding,
         match_count=limit,
         filter_para_folder="3_Resources",
@@ -89,7 +89,7 @@ def get_note(file_path: str) -> str:
     Args:
         file_path: Path relative to vault root (e.g. '3_Resources/definitions/p/powerflex.md')
     """
-    chunks = supabase_client.get_note_chunks(file_path)
+    chunks = qdrant_store.get_note_chunks(file_path)
     if not chunks:
         return f"Note not found: {file_path}"
     return "\n\n".join(c["content"] for c in chunks)

@@ -1,11 +1,11 @@
 [project]
 name = "vault-rag-mcp"
 version = "0.1.0"
-description = "MCP server for semantic search in an Obsidian vault via Supabase pgvector + Google Gemini embeddings"
+description = "MCP server for semantic search in an Obsidian vault via Qdrant + Google Gemini embeddings"
 requires-python = ">=3.11"
 dependencies = [
     "mcp[cli]>=1.9.0",
-    "supabase>=2.0.0",
+    "qdrant-client>=1.12.0",
     "google-genai>=1.0.0",
     "pyyaml>=6.0",
     "python-dotenv>=1.0.0",
