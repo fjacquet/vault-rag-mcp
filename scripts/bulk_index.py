@@ -14,6 +14,8 @@ Options:
 import hashlib
 import re
 import sys
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import yaml
@@ -36,8 +38,10 @@ load_dotenv()
 # Directories and files to skip
 SKIP_DIRS = {".obsidian", "templates", ".git", ".trash", ".smart-env", "node_modules"}
 MAX_FILE_SIZE = 500 * 1024  # 500 KB
-BATCH_SIZE = 50  # Chunks per batch (Gemini: 20K tokens/request, 250 texts max)
+BATCH_SIZE = 50  # Chunks per embedding API call (small batches, parallelized)
+WORKERS = 4  # Concurrent embedding requests (4 × 50 = 200 chunks in flight)
 MAX_CHUNK_CHARS = 2000  # Conservative: ~1500 tokens, safe for Gemini 2048 token/text limit
+MAX_RETRIES = 5  # Max retries per batch on rate limit errors
 
 
 def file_hash(content: str) -> str:
@@ -208,35 +212,70 @@ def embed_single_chunk(chunk: dict) -> bool:
         return False
 
 
-def embed_and_upsert(all_chunks: list[dict]) -> tuple[int, int]:
-    """Embed chunks in batches and upsert to Qdrant. Returns (upserted, skipped)."""
-    total = 0
+def embed_batch_with_retry(batch: list[dict], batch_idx: int) -> tuple[list[dict], int]:
+    """Embed a single batch with retry on rate limit. Returns (embedded_chunks, skipped_count)."""
+    texts = [c["content"] for c in batch]
     skipped = 0
 
-    for i in tqdm(range(0, len(all_chunks), BATCH_SIZE), desc="Embedding + upserting"):
-        batch = all_chunks[i : i + BATCH_SIZE]
-        texts = [c["content"] for c in batch]
-
+    for attempt in range(MAX_RETRIES):
         try:
             embeddings = get_embeddings_batch(texts, task_type="RETRIEVAL_DOCUMENT")
             for chunk, emb in zip(batch, embeddings):
                 chunk["embedding"] = emb
-        except Exception:
-            # Batch failed — retry each chunk individually
-            for chunk in batch:
-                if not embed_single_chunk(chunk):
-                    skipped += 1
-                    tqdm.write(f"Skipped (too long): {chunk['file_path']} chunk {chunk['chunk_index']} ({len(chunk['content'])} chars)")
+            break
+        except Exception as e:
+            err_str = str(e).lower()
+            if "429" in err_str or "rate" in err_str or "quota" in err_str or "resource" in err_str:
+                wait = 2 ** attempt * 5  # 5s, 10s, 20s, 40s, 80s
+                tqdm.write(f"Rate limited (batch {batch_idx}), retry in {wait}s...")
+                time.sleep(wait)
+            elif attempt < MAX_RETRIES - 1:
+                time.sleep(2)
+            else:
+                # Final attempt failed — retry each chunk individually
+                for chunk in batch:
+                    if not embed_single_chunk(chunk):
+                        skipped += 1
+                        tqdm.write(f"Skipped: {chunk['file_path']} chunk {chunk['chunk_index']} ({len(chunk['content'])} chars)")
 
-        embedded_batch = [c for c in batch if "embedding" in c]
-        if embedded_batch:
-            try:
-                upsert_chunks(embedded_batch)
-                total += len(embedded_batch)
-            except Exception as e:
-                skipped += len(embedded_batch)
-                tqdm.write(f"Upsert error (batch {i // BATCH_SIZE}): {e}")
+    embedded = [c for c in batch if "embedding" in c]
+    return embedded, skipped
 
+
+def embed_and_upsert(all_chunks: list[dict]) -> tuple[int, int]:
+    """Embed chunks in parallel batches and upsert to Qdrant. Returns (upserted, skipped)."""
+    total = 0
+    skipped = 0
+
+    # Split into batches
+    batches = []
+    for i in range(0, len(all_chunks), BATCH_SIZE):
+        batches.append((i // BATCH_SIZE, all_chunks[i : i + BATCH_SIZE]))
+
+    pbar = tqdm(total=len(batches), desc=f"Embedding + upserting ({WORKERS} workers)")
+
+    with ThreadPoolExecutor(max_workers=WORKERS) as executor:
+        # Submit all batches to the thread pool
+        futures = {
+            executor.submit(embed_batch_with_retry, batch, idx): idx
+            for idx, batch in batches
+        }
+
+        for future in as_completed(futures):
+            embedded, batch_skipped = future.result()
+            skipped += batch_skipped
+
+            if embedded:
+                try:
+                    upsert_chunks(embedded)
+                    total += len(embedded)
+                except Exception as e:
+                    skipped += len(embedded)
+                    tqdm.write(f"Upsert error (batch {futures[future]}): {e}")
+
+            pbar.update(1)
+
+    pbar.close()
     return total, skipped
 
 
@@ -295,7 +334,7 @@ def main():
         return
 
     # Embed and upsert
-    print(f"\nEmbedding {len(all_chunks)} chunks via Google Gemini (batch size {BATCH_SIZE})...")
+    print(f"\nEmbedding {len(all_chunks)} chunks via Google Gemini ({WORKERS} workers × batch {BATCH_SIZE})...")
     upserted, skipped = embed_and_upsert(all_chunks)
     print(f"\nDone! Upserted {upserted} chunks to Qdrant.")
     if skipped:
