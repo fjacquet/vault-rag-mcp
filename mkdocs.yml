@@ -1,0 +1,17 @@
+site_name: vault-rag-mcp
+site_description: MCP server for semantic search in an Obsidian Second Brain vault (Qdrant + Google Gemini embeddings)
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+  features:
+    - navigation.sections
+    - content.code.copy
+nav:
+  - Home: index.md
+markdown_extensions:
+  - admonition
+  - pymdownx.highlight
+  - pymdownx.superfences

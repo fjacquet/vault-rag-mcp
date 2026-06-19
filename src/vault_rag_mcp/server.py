@@ -29,10 +29,7 @@ def _format_result(r: dict) -> str:
     # Truncate long content for readability
     if len(content) > 500:
         content = content[:500] + "..."
-    return (
-        f"[{similarity:.3f}] {file_path} ({para_folder}/{note_type})\n"
-        f"{content}\n"
-    )
+    return f"[{similarity:.3f}] {file_path} ({para_folder}/{note_type})\n{content}\n"
 
 
 @mcp.tool()

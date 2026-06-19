@@ -6,3 +6,11 @@ dist/
 *.egg-info/
 .mypy_cache/
 n8n-workflows
+
+# CI / build artifacts
+site/
+.coverage
+coverage.xml
+*.sarif
+.pytest_cache/
+.ruff_cache/
