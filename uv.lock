@@ -2101,13 +2101,11 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "cyclonedx-bom" },
+    { name = "mkdocs" },
+    { name = "mkdocs-material" },
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "ruff" },
-]
-docs = [
-    { name = "mkdocs" },
-    { name = "mkdocs-material" },
 ]
 
 [package.metadata]
@@ -2123,13 +2121,11 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "cyclonedx-bom", specifier = ">=4.0.0" },
+    { name = "mkdocs", specifier = ">=1.6.0" },
+    { name = "mkdocs-material", specifier = ">=9.5.0" },
     { name = "pytest", specifier = ">=8.0.0" },
     { name = "pytest-cov", specifier = ">=5.0.0" },
     { name = "ruff", specifier = ">=0.6.0" },
-]
-docs = [
-    { name = "mkdocs", specifier = ">=1.6.0" },
-    { name = "mkdocs-material", specifier = ">=9.5.0" },
 ]
 
 [[package]]
