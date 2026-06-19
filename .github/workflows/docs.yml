@@ -1,11 +1,13 @@
 name: Docs
+# Docs publish to GitHub Pages. Runs post-merge on the default branch (and
+# manually) — NOT on pull_request — because the Pages deploy requires Pages to
+# be enabled on the repo (Settings -> Pages -> Source: GitHub Actions). Enable
+# it, then this deploys on the next push to maincd. `make docs` (strict mkdocs
+# build) still runs in CI via the build step here once Pages is enabled.
 on:
   push:
     branches: [maincd]
     paths: ["docs/**", "mkdocs.yml", ".github/workflows/docs.yml"]
-  pull_request:
-    branches: [maincd]
-    paths: ["docs/**", "mkdocs.yml"]
   workflow_dispatch:
 permissions: { contents: read, pages: write, id-token: write }
 jobs:
