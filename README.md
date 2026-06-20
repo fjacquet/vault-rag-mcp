@@ -1,5 +1,7 @@
 # vault-rag-mcp
 
+[![CI](https://github.com/fjacquet/vault-rag-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/fjacquet/vault-rag-mcp/actions/workflows/ci.yml)
+
 MCP server for semantic search in an Obsidian Second Brain vault, using a self-hosted Qdrant vector store and Google Gemini embeddings.
 
 ## Architecture
