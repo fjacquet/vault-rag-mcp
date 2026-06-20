@@ -1,13 +1,13 @@
 # vault-rag-mcp
 
-MCP server for semantic search in an Obsidian Second Brain vault, using Supabase pgvector and Google Gemini embeddings.
+MCP server for semantic search in an Obsidian Second Brain vault, using a self-hosted Qdrant vector store and Google Gemini embeddings.
 
 ## Architecture
 
 ```
 Claude Code <-> vault-rag MCP server (stdio)
                  |-> Google Gemini gemini-embedding-001 (native 3072d)
-                 |-> Supabase pgvector halfvec cosine similarity
+                 |-> Qdrant `vault_chunks` collection (3072d, Cosine distance)
 ```
 
 Part of a hybrid RAG architecture:
@@ -17,7 +17,7 @@ Part of a hybrid RAG architecture:
 - **Bulk index**: Script using Gemini `gemini-embedding-001`
 
 Same model (`gemini-embedding-001`, native 3072d) everywhere ensures vector compatibility.
-Storage optimized with `halfvec` (float16) — full quality at half the storage (~284 MB vs ~567 MB).
+Vectors are stored at native 3072 dimensions (float32) with Cosine distance.
 
 Asymmetric task types: `RETRIEVAL_DOCUMENT` for indexing, `RETRIEVAL_QUERY` for search.
 
@@ -34,7 +34,7 @@ Asymmetric task types: `RETRIEVAL_DOCUMENT` for indexing, `RETRIEVAL_QUERY` for 
 - Python >= 3.11
 - [uv](https://docs.astral.sh/uv/) package manager
 - Google API key (for Gemini embeddings)
-- Supabase project with `vault_chunks` table and pgvector
+- Qdrant instance with a `vault_chunks` collection (created automatically on first index)
 
 ## Setup
 
@@ -45,18 +45,17 @@ uv sync
 
 # Configure environment
 cp .env.example .env
-# Edit .env with your Google API key and Supabase credentials
+# Edit .env with your Google API key and Qdrant credentials
 ```
 
 ### Environment variables
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `SUPABASE_URL` | Supabase project URL | (required) |
-| `SUPABASE_KEY` | Supabase anon key | (required) |
+| `QDRANT_URL` | Qdrant instance URL (HTTPS requires the `:443` port; appended automatically if missing) | (required) |
+| `QDRANT_API_KEY` | Qdrant API key | (required) |
 | `GOOGLE_API_KEY` | Google AI API key | (required) |
 | `EMBEDDING_MODEL` | Gemini embedding model | `gemini-embedding-001` |
-| `EMBEDDING_DIMENSIONS` | Output dimensions (native=3072) | `3072` |
 
 ## Usage
 
@@ -71,11 +70,10 @@ Add to your project's `.mcp.json`:
       "command": "uv",
       "args": ["run", "--directory", "/path/to/vault-rag-mcp", "vault-rag-mcp"],
       "env": {
-        "SUPABASE_URL": "https://your-project.supabase.co",
-        "SUPABASE_KEY": "your-anon-key",
+        "QDRANT_URL": "https://your-qdrant-instance.example.com",
+        "QDRANT_API_KEY": "your-qdrant-api-key",
         "GOOGLE_API_KEY": "your-google-api-key",
-        "EMBEDDING_MODEL": "gemini-embedding-001",
-        "EMBEDDING_DIMENSIONS": "3072"
+        "EMBEDDING_MODEL": "gemini-embedding-001"
       }
     }
   }
@@ -100,7 +98,7 @@ The script:
 2. Parses YAML frontmatter (type, tags, PARA folder)
 3. Chunks by H2 sections, splits oversized chunks (> 2000 chars)
 4. Embeds via Google Gemini in batches of 50 (task_type=RETRIEVAL_DOCUMENT)
-5. Upserts to Supabase with SHA256 file_hash for incremental re-runs
+5. Upserts to Qdrant with a SHA256 file_hash payload for incremental re-runs
 
 After initial bulk indexation, incremental updates are handled by n8n via Gemini API.
 
@@ -115,7 +113,7 @@ vault-rag-mcp/
 │       ├── __init__.py
 │       ├── server.py           # MCP server (FastMCP, stdio) — 3 tools
 │       ├── embeddings.py       # Google Gemini embedding client (native 3072d)
-│       └── supabase_client.py  # Supabase CRUD + RPC calls
+│       └── qdrant_store.py     # Qdrant client + collection operations
 ├── scripts/
 │   └── bulk_index.py           # Bulk indexation via Google Gemini
 └── n8n-workflows/              # n8n workflow definitions
@@ -123,23 +121,24 @@ vault-rag-mcp/
     └── vault-rag-chat-hub.json
 ```
 
-## Supabase schema
+## Qdrant collection
 
-Table `vault_chunks` with:
-- `content TEXT` — chunk text
-- `embedding HALFVEC(3072)` — gemini-embedding-001 vector (float16, half storage)
-- `metadata JSONB` — tags, type, para_folder
-- `file_path TEXT` — relative path from vault root
-- `chunk_index INTEGER` — position within file
-- `para_folder TEXT` — PARA folder (1_Projects, 2_Areas, etc.)
-- `note_type TEXT` — frontmatter type (memo, glossary, howto, etc.)
-- `file_hash TEXT` — SHA256 for change detection
+Collection `vault_chunks` — vectors at 3072 dimensions, Cosine distance. Each point carries:
+- `content` — chunk text
+- `file_path` — relative path from vault root
+- `chunk_index` — position within file
+- `para_folder` — PARA folder (1_Projects, 2_Areas, etc.)
+- `note_type` — frontmatter type (memo, glossary, howto, etc.)
+- `file_hash` — SHA256 for change detection
+- `metadata` — tags, type, para_folder
 
-RPC functions: `search_vault()`, `match_vault_chunks()`, `delete_file_chunks()`
+Point IDs are deterministic UUID5 values derived from `file_path::chunk_index`.
+
+Payload indexes: `file_path` (keyword), `para_folder` (keyword), `note_type` (keyword), `chunk_index` (integer).
 
 ## Tech stack
 
 - **MCP SDK**: `mcp[cli]` with `FastMCP` (stdio transport)
-- **Embeddings**: Google Gemini `gemini-embedding-001` (native 3072d, multilingual, 2048 token/text)
-- **Vector DB**: Supabase PostgreSQL + pgvector 0.8.0 (HNSW cosine, halfvec storage)
+- **Embeddings**: Google Gemini `gemini-embedding-001` via the `google-genai` SDK (native 3072d, multilingual, 2048 token/text)
+- **Vector DB**: Qdrant (self-hosted) — `vault_chunks` collection, 3072d Cosine distance
 - **Build**: uv + hatch
