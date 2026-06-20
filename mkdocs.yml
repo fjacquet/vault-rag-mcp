@@ -1,4 +1,6 @@
 site_name: vault-rag-mcp
+repo_url: https://github.com/fjacquet/vault-rag-mcp
+repo_name: fjacquet/vault-rag-mcp
 site_description: MCP server for semantic search in an Obsidian Second Brain vault (Qdrant + Google Gemini embeddings)
 theme:
   name: material
