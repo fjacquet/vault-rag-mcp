@@ -40,7 +40,9 @@ SKIP_DIRS = {".obsidian", "templates", ".git", ".trash", ".smart-env", "node_mod
 MAX_FILE_SIZE = 500 * 1024  # 500 KB
 BATCH_SIZE = 50  # Chunks per embedding API call (small batches, parallelized)
 WORKERS = 4  # Concurrent embedding requests (4 × 50 = 200 chunks in flight)
-MAX_CHUNK_CHARS = 2000  # Conservative: ~1500 tokens, safe for Gemini 2048 token/text limit
+MAX_CHUNK_CHARS = (
+    2000  # Conservative: ~1500 tokens, safe for Gemini 2048 token/text limit
+)
 MAX_RETRIES = 5  # Max retries per batch on rate limit errors
 
 
@@ -63,7 +65,7 @@ def parse_frontmatter(content: str) -> tuple[dict, str]:
     except yaml.YAMLError:
         metadata = {}
 
-    body = content[match.end():]
+    body = content[match.end() :]
     return metadata, body
 
 
@@ -129,7 +131,13 @@ def chunk_by_h2(body: str) -> list[str]:
 def get_para_folder(rel_path: str) -> str:
     """Extract PARA folder from relative path."""
     parts = rel_path.split("/")
-    if parts and parts[0] in ("0_Inbox", "1_Projects", "2_Areas", "3_Resources", "4_Archives"):
+    if parts and parts[0] in (
+        "0_Inbox",
+        "1_Projects",
+        "2_Areas",
+        "3_Resources",
+        "4_Archives",
+    ):
         return parts[0]
     return "other"
 
@@ -185,19 +193,21 @@ def index_file(
 
     chunks = []
     for i, chunk_text in enumerate(chunks_text):
-        chunks.append({
-            "content": chunk_text,
-            "file_path": rel_path,
-            "chunk_index": i,
-            "para_folder": para_folder,
-            "note_type": note_type if isinstance(note_type, str) else "unknown",
-            "file_hash": content_hash if i == 0 else None,
-            "metadata": {
-                "tags": tags,
-                "type": note_type,
+        chunks.append(
+            {
+                "content": chunk_text,
+                "file_path": rel_path,
+                "chunk_index": i,
                 "para_folder": para_folder,
-            },
-        })
+                "note_type": note_type if isinstance(note_type, str) else "unknown",
+                "file_hash": content_hash if i == 0 else None,
+                "metadata": {
+                    "tags": tags,
+                    "type": note_type,
+                    "para_folder": para_folder,
+                },
+            }
+        )
 
     return chunks
 
@@ -205,7 +215,9 @@ def index_file(
 def embed_single_chunk(chunk: dict) -> bool:
     """Embed a single chunk individually. Returns True on success."""
     try:
-        embeddings = get_embeddings_batch([chunk["content"]], task_type="RETRIEVAL_DOCUMENT")
+        embeddings = get_embeddings_batch(
+            [chunk["content"]], task_type="RETRIEVAL_DOCUMENT"
+        )
         chunk["embedding"] = embeddings[0]
         return True
     except Exception:
@@ -220,13 +232,18 @@ def embed_batch_with_retry(batch: list[dict], batch_idx: int) -> tuple[list[dict
     for attempt in range(MAX_RETRIES):
         try:
             embeddings = get_embeddings_batch(texts, task_type="RETRIEVAL_DOCUMENT")
-            for chunk, emb in zip(batch, embeddings):
+            for chunk, emb in zip(batch, embeddings, strict=False):
                 chunk["embedding"] = emb
             break
         except Exception as e:
             err_str = str(e).lower()
-            if "429" in err_str or "rate" in err_str or "quota" in err_str or "resource" in err_str:
-                wait = 2 ** attempt * 5  # 5s, 10s, 20s, 40s, 80s
+            if (
+                "429" in err_str
+                or "rate" in err_str
+                or "quota" in err_str
+                or "resource" in err_str
+            ):
+                wait = 2**attempt * 5  # 5s, 10s, 20s, 40s, 80s
                 tqdm.write(f"Rate limited (batch {batch_idx}), retry in {wait}s...")
                 time.sleep(wait)
             elif attempt < MAX_RETRIES - 1:
@@ -236,7 +253,9 @@ def embed_batch_with_retry(batch: list[dict], batch_idx: int) -> tuple[list[dict
                 for chunk in batch:
                     if not embed_single_chunk(chunk):
                         skipped += 1
-                        tqdm.write(f"Skipped: {chunk['file_path']} chunk {chunk['chunk_index']} ({len(chunk['content'])} chars)")
+                        tqdm.write(
+                            f"Skipped: {chunk['file_path']} chunk {chunk['chunk_index']} ({len(chunk['content'])} chars)"
+                        )
 
     embedded = [c for c in batch if "embedding" in c]
     return embedded, skipped
@@ -325,7 +344,9 @@ def main():
             errors += 1
             tqdm.write(f"Error processing {path}: {e}")
 
-    print(f"\nParsed: {len(md_files) - skipped - errors} files → {len(all_chunks)} chunks")
+    print(
+        f"\nParsed: {len(md_files) - skipped - errors} files → {len(all_chunks)} chunks"
+    )
     print(f"Skipped (unchanged): {skipped}")
     print(f"Errors: {errors}")
 
@@ -334,7 +355,9 @@ def main():
         return
 
     # Embed and upsert
-    print(f"\nEmbedding {len(all_chunks)} chunks via Google Gemini ({WORKERS} workers × batch {BATCH_SIZE})...")
+    print(
+        f"\nEmbedding {len(all_chunks)} chunks via Google Gemini ({WORKERS} workers × batch {BATCH_SIZE})..."
+    )
     upserted, skipped = embed_and_upsert(all_chunks)
     print(f"\nDone! Upserted {upserted} chunks to Qdrant.")
     if skipped:

@@ -78,7 +78,9 @@ def search_vault(
     conditions = []
     if filter_para_folder:
         conditions.append(
-            FieldCondition(key="para_folder", match=MatchValue(value=filter_para_folder))
+            FieldCondition(
+                key="para_folder", match=MatchValue(value=filter_para_folder)
+            )
         )
     if filter_note_type:
         conditions.append(
@@ -135,7 +137,9 @@ def delete_file_chunks(file_path: str) -> None:
         collection_name=COLLECTION,
         points_selector=FilterSelector(
             filter=Filter(
-                must=[FieldCondition(key="file_path", match=MatchValue(value=file_path))]
+                must=[
+                    FieldCondition(key="file_path", match=MatchValue(value=file_path))
+                ]
             )
         ),
         wait=True,

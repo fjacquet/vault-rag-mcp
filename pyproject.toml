@@ -24,3 +24,38 @@ packages = ["src/vault_rag_mcp"]
 
 [tool.hatch.build.targets.sdist]
 include = ["src/vault_rag_mcp"]
+
+[dependency-groups]
+# All tooling lives in `dev` so `uv run <tool>` (which syncs the default
+# `dev` group) finds it without an explicit `--group` flag. The central
+# mkdocs-publish action runs a bare `make docs` with no separate sync step,
+# so mkdocs must be in the default-synced group.
+dev = [
+    "ruff>=0.6.0",
+    "pytest>=8.0.0",
+    "pytest-cov>=5.0.0",
+    "cyclonedx-bom>=4.0.0",
+    "mkdocs>=1.6.0",
+    "mkdocs-material>=9.5.0",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP", "B"]
+# E501 (line-too-long) is deferred: the only offenders are pre-existing
+# docstring/comment lines that read better unwrapped. Greenfield CI introduces
+# ruff for the first time here; the formatter still enforces code-line length,
+# so this only relaxes prose. Re-enable and reflow if the team wants it.
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# bulk_index.py mutates sys.path before importing the package, so imports
+# intentionally follow non-import code (E402).
+"scripts/bulk_index.py" = ["E402"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--cov=src/vault_rag_mcp"
