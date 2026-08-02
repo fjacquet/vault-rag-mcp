@@ -6,12 +6,12 @@ Exposes 3 tools:
 - get_note: retrieve full content of a specific note
 """
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from . import qdrant_store
 from .embeddings import get_embedding
 
-mcp = FastMCP(
+mcp = MCPServer(
     name="vault-rag",
     instructions="Semantic search in an Obsidian Second Brain vault. "
     "Use search_vault for general queries, search_glossary for term definitions, "
