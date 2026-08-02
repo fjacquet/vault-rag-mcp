@@ -6,6 +6,8 @@ Exposes 3 tools:
 - get_note: retrieve full content of a specific note
 """
 
+from importlib.metadata import version
+
 from mcp.server.mcpserver import MCPServer
 
 from . import qdrant_store
@@ -16,6 +18,7 @@ mcp = MCPServer(
     instructions="Semantic search in an Obsidian Second Brain vault. "
     "Use search_vault for general queries, search_glossary for term definitions, "
     "and get_note to retrieve a specific note by file path.",
+    version=version("vault-rag-mcp"),
 )
 
 

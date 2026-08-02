@@ -4,6 +4,8 @@ These verify the package imports cleanly and the MCP server exposes its three
 tools without requiring any network credentials (clients are lazy-initialized).
 """
 
+from importlib.metadata import version
+
 from vault_rag_mcp import server
 
 
@@ -11,6 +13,11 @@ def test_server_module_imports():
     """The server module imports without instantiating any network client."""
     assert server.mcp is not None
     assert server.mcp.name == "vault-rag"
+
+
+def test_server_reports_package_version():
+    """The server's init metadata exposes the installed package version."""
+    assert server.mcp.version == version("vault-rag-mcp")
 
 
 def test_format_result_truncates_long_content():
