@@ -1,6 +1,6 @@
 [project]
 name = "vault-rag-mcp"
-version = "0.1.1"
+version = "1.0.0"
 description = "MCP server for semantic search in an Obsidian vault via Qdrant + Google Gemini embeddings"
 requires-python = ">=3.11"
 dependencies = [
