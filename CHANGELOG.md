@@ -42,7 +42,7 @@ First tagged release. Before this tag the project:
 - Lowered `MAX_CHUNK_CHARS` to 2000 with a per-chunk retry fallback, and parallelised bulk indexation over 4 workers.
 - Adopted the shared `fjacquet/ci@v1` CI (fixing a `maincd` branch-filter typo) and cleared Dependabot alerts via full `uv.lock` upgrades.
 
-[Unreleased]: https://github.com/fjacquet/vault-rag-mcp/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/fjacquet/vault-rag-mcp/compare/v1.0.1...HEAD
 [1.0.1]: https://github.com/fjacquet/vault-rag-mcp/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/fjacquet/vault-rag-mcp/compare/v0.1.0...v1.0.0
 [0.1.0]: https://github.com/fjacquet/vault-rag-mcp/releases/tag/v0.1.0
